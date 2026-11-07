@@ -35,9 +35,11 @@ jobs:
           sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config \
             zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev lld
 
-      - name: 自動同意 Android SDK 授權合約
-        run: |
-          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
+- name: 自動同意 Android SDK 授權合約
+    run: |
+      echo "y" | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
+      mkdir -p ~/.buildozer/android/platform/android-sdk/licenses
+      echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
 
       - name: 安裝 Buildozer 並強制鎖定 Cython < 3.0 (防編譯崩潰)
         run: |
