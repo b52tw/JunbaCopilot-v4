@@ -13,15 +13,15 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: 簽出程式碼
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: 設定 Python 3.10
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: 注入 GitHub Secrets 至 config.json (若有設定)
+      - name: Inject GitHub Secrets to config.json
         run: |
           if [ -n "${{ secrets.GEMINI_API_KEY }}" ]; then
             echo '{"GEMINI_API_KEY": "${{ secrets.GEMINI_API_KEY }}"}' > config.json
@@ -29,33 +29,33 @@ jobs:
             echo '{}' > config.json
           fi
 
-      - name: 安裝系統編譯依賴庫
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config \
             zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev lld
 
-- name: 自動同意 Android SDK 授權合約
-    run: |
-      echo "y" | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
-      mkdir -p ~/.buildozer/android/platform/android-sdk/licenses
-      echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
+      - name: Auto-accept Android SDK Licenses
+        run: |
+          mkdir -p ~/.buildozer/android/platform/android-sdk/licenses
+          echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee" > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
+          echo -e "\n84831b9409646a918e30573bab4c9c91346d8abd" >> ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
 
-      - name: 安裝 Buildozer 並強制鎖定 Cython < 3.0 (防編譯崩潰)
+      - name: Install Buildozer and Cython
         run: |
           pip install --upgrade pip
           pip install "Cython<3.0" buildozer
 
-      - name: 執行 Buildozer 雲端編譯
+      - name: Run Buildozer
         run: |
           buildozer android debug
 
-      - name: 整理 APK 檔名以利直接安裝
+      - name: Prepare APK
         id: prepare_apk
         run: |
           APK_PATH=$(find bin/ -name "*.apk" | head -n 1)
           if [ -z "$APK_PATH" ]; then
-            echo "錯誤：未找到編譯出的 APK 檔案！"
+            echo "Error: APK not found!"
             exit 1
           fi
           cp "$APK_PATH" bin/JunbaCopilot-v4.apk
@@ -64,7 +64,7 @@ jobs:
           RELEASE_TAG="v$(date +'%Y.%m.%d-%H%M')"
           echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
 
-      - name: 自動發佈至 GitHub Release (提供手機直接下載 .apk)
+      - name: Release APK
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.prepare_apk.outputs.release_tag }}
@@ -72,12 +72,9 @@ jobs:
           body: |
             ### 🚗 峻爸副駕 v4 最新安裝檔
             * **核心功能**：
-              - 寬鬆喚醒詞過濾（支援「副駕副駕」等諧音）
-              - 支援語音直接切換 A/B/C 三種方案
-              - 內建閒聊模式 (無字數限制)
-              - 5分鐘氣象與路況巡檢
-            * **手機安裝說明**：
-              - 點擊下方 `JunbaCopilot-v4.apk` 直接下載並安裝。
+              - 寬鬆喚醒詞過濾
+              - A/B/C 三種方案切換
+              - 閒聊模式與路況巡檢
           files: ${{ steps.prepare_apk.outputs.apk_file }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
