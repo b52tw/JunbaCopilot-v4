@@ -8,6 +8,7 @@ import platform
 import threading
 import urllib.parse
 import webbrowser
+import requests
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
@@ -85,7 +86,6 @@ class WakeWordParser:
                 command = raw_text[end_pos:].strip(" ，、。！？\t\n")
                 return True, command
 
-        # 特徵計數容錯防漏
         if (normalized.count("副") + normalized.count("駕")) >= 3:
             last_idx = max(raw_text.rfind("駕"), raw_text.rfind("架"), raw_text.rfind("價"))
             if last_idx != -1 and last_idx + 1 < len(raw_text):
@@ -171,53 +171,48 @@ class AndroidBridge:
             print(f"[桌面模擬] 連動開啟 Google Maps：{query}")
 
 class GeminiCopilotAI:
+    """採用純 Python REST API 直連 Gemini 2.5 Flash，100% 避免 Android 底層編譯崩潰"""
     def __init__(self):
         self.api_key = self._load_api_key()
-        self.client = None
-        self.chat_session = None # 用於 C 方案閒聊模式
-        if self.api_key:
-            self._init_gemini()
+        self.chat_history = []  # 用於 C 方案閒聊模式的上下文記憶
 
     def _load_api_key(self):
         if os.path.exists(".secure_api.dat"):
             try:
                 with open(".secure_api.dat", "r") as f:
-                    return base64.b64decode(f.read()).decode('utf-8')
+                    return base64.b64decode(f.read()).decode('utf-8').strip()
             except: pass
-        return os.environ.get("GEMINI_API_KEY", "")
+        if os.path.exists("config.json"):
+            try:
+                with open("config.json", "r") as f:
+                    return json.load(f).get("GEMINI_API_KEY", "").strip()
+            except: pass
+        return os.environ.get("GEMINI_API_KEY", "").strip()
 
     def _init_gemini(self):
-        try:
-            from google import genai
-            from google.genai import types
-            self.client = genai.Client(api_key=self.api_key)
-            
-            # C 方案專屬的閒聊 Session (解除字數限制)
-            chat_sys_prompt = (
-                "你是「峻爸副駕 v4」隨車智慧 AI，兼具『專業領航員』與『幽默副駕駛』雙重身分。嚴禁 markdown 符號。\n"
-                "目前處於【閒聊與深度探索模式】：\n"
-                "請『解除所有字數限制』！展現博學、幽默、像朋友一樣的語氣，可以深度分析景點典故或進行長篇自由對談。\n"
-                "若使用者確定要導航，請在對話最後附上 [MAP:目標名稱]。"
-            )
-            self.chat_session = self.client.chats.create(
-                model='gemini-2.5-flash',
-                config=types.GenerateContentConfig(
-                    system_instruction=chat_sys_prompt,
-                    tools=[types.Tool(google_search=types.GoogleSearch())],
-                    temperature=0.6
-                )
-            )
-        except Exception as e:
-            print(f"[Gemini Init Error]: {e}")
+        self.chat_history = []
+
+    def _call_gemini_rest(self, contents, sys_prompt, temperature=0.3):
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={self.api_key}"
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "system_instruction": {"parts": [{"text": sys_prompt}]},
+            "contents": contents,
+            "tools": [{"google_search": {}}],
+            "generationConfig": {"temperature": temperature}
+        }
+        resp = requests.post(url, headers=headers, json=payload, timeout=25)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
 
     def query_task(self, prompt: str, poi_context: str, callback):
-        """A/B 方案專用的單次任務模式 (嚴格限制字數與負評)"""
+        """A/B 方案專用的單次任務模式"""
         def _worker():
-            if not self.client:
-                callback("未配置 GEMINI_API_KEY。", False, "")
+            if not self.api_key:
+                callback("未配置 GEMINI_API_KEY，請長按圓鈕開啟設定。", False, "")
                 return
             try:
-                from google.genai import types
                 sys_prompt = (
                     "你是「峻爸副駕 v4」隨車 AI。語氣簡明，嚴禁 markdown 符號。\n"
                     f"{poi_context}\n"
@@ -227,33 +222,33 @@ class GeminiCopilotAI:
                     "3. 字數嚴格限制在 35 到 65 字，適合行車朗讀。\n"
                     "4. 若有具體推薦地點，最後一行附上：[MAP:目標名稱]"
                 )
-                response = self.client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=sys_prompt,
-                        tools=[types.Tool(google_search=types.GoogleSearch())],
-                        temperature=0.3
-                    )
-                )
-                self._process_response(response.text, callback)
+                contents = [{"role": "user", "parts": [{"text": prompt}]}]
+                reply_text = self._call_gemini_rest(contents, sys_prompt, temperature=0.3)
+                self._process_response(reply_text, callback)
             except Exception as e:
                 callback(f"任務處理延遲：{str(e)[:30]}", False, "")
         threading.Thread(target=_worker, daemon=True).start()
 
     def query_chat(self, prompt: str, poi_context: str, callback):
-        """C 方案專用的閒聊模式 (具備上下文記憶，無字數限制)"""
+        """C 方案專用的閒聊模式 (具備多輪記憶，無字數限制)"""
         def _worker():
-            if not self.chat_session:
-                callback("閒聊模組未初始化或無金鑰。", False, "")
+            if not self.api_key:
+                callback("未配置 GEMINI_API_KEY，請長按圓鈕開啟設定。", False, "")
                 return
             try:
-                full_message = prompt
-                if poi_context:
-                    full_message = f"{poi_context}\n駕駛說：{prompt}"
-                
-                response = self.chat_session.send_message(full_message)
-                self._process_response(response.text, callback)
+                chat_sys_prompt = (
+                    "你是「峻爸副駕 v4」隨車智慧 AI，兼具『專業領航員』與『幽默副駕駛』雙重身分。嚴禁 markdown 符號。\n"
+                    "目前處於【閒聊與深度探索模式】：\n"
+                    "請『解除所有字數限制』！展現博學、幽默、像朋友一樣的語氣，可以深度分析景點典故或進行長篇自由對談。\n"
+                    "若使用者確定要導航，請在對話最後附上 [MAP:目標名稱]。"
+                )
+                full_message = f"{poi_context}\n駕駛說：{prompt}" if poi_context else prompt
+                self.chat_history.append({"role": "user", "parts": [{"text": full_message}]})
+                # 保留最近 10 輪對話避免超過限制
+                recent_history = self.chat_history[-20:]
+                reply_text = self._call_gemini_rest(recent_history, chat_sys_prompt, temperature=0.6)
+                self.chat_history.append({"role": "model", "parts": [{"text": reply_text}]})
+                self._process_response(reply_text, callback)
             except Exception as e:
                 callback(f"閒聊稍有延遲：{str(e)[:30]}", False, "")
         threading.Thread(target=_worker, daemon=True).start()
@@ -284,7 +279,6 @@ class FloatingWidget(BoxLayout):
         self.long_press_clock = None
         self.monitor_thread = None
 
-        # HUD 看板
         self.status_label = Label(
             text="🟢 方案 A：待命中\n(需喊「副駕副駕」喚醒)",
             font_size="19sp",
@@ -295,7 +289,6 @@ class FloatingWidget(BoxLayout):
         self.status_label.bind(size=self.status_label.setter('text_size'))
         self.add_widget(self.status_label)
 
-        # 浮動圓鈕主體
         self.btn_float = Button(
             text="待",
             font_size="40sp",
@@ -303,7 +296,7 @@ class FloatingWidget(BoxLayout):
             size_hint=(None, None),
             size=("140dp", "140dp"),
             pos_hint={"center_x": 0.5},
-            background_color=(0.1, 0.6, 0.3, 1) # 預設綠燈
+            background_color=(0.1, 0.6, 0.3, 1)
         )
         self.btn_float.bind(on_touch_down=self.on_btn_touch_down)
         self.btn_float.bind(on_touch_up=self.on_btn_touch_up)
@@ -311,7 +304,6 @@ class FloatingWidget(BoxLayout):
 
     def on_btn_touch_down(self, instance, touch):
         if instance.collide_point(*touch.pos):
-            # 若正在長篇大論，點擊按鈕直接強制閉嘴
             self.bridge.stop_speaking()
             self.long_press_clock = Clock.schedule_once(lambda dt: self.open_main_menu(), 0.8)
             return True
@@ -329,7 +321,7 @@ class FloatingWidget(BoxLayout):
         if not self.is_listening:
             self.is_listening = True
             self.btn_float.text = "監"
-            self.btn_float.background_color = (0.9, 0.2, 0.2, 1) # 🔴 紅燈監聽
+            self.btn_float.background_color = (0.9, 0.2, 0.2, 1)
             self.status_label.text = "🔴 監聽中 (請說「副駕副駕」+ 指令)..."
             self.status_label.color = (0.9, 0.3, 0.3, 1)
             self.bridge.start_speech_recognition()
@@ -340,18 +332,18 @@ class FloatingWidget(BoxLayout):
     def update_mode_ui(self):
         if self.current_mode == "A":
             self.btn_float.text = "待"
-            self.btn_float.background_color = (0.1, 0.6, 0.3, 1) # 🟢 綠燈待命
+            self.btn_float.background_color = (0.1, 0.6, 0.3, 1)
             self.status_label.text = "🟢 方案 A：傳統待命\n(單次精確指令)"
             self.status_label.color = (0.2, 0.9, 0.4, 1)
         elif self.current_mode == "B":
             self.btn_float.text = "巡"
-            self.btn_float.background_color = (0.5, 0.2, 0.8, 1) # 🟣 紫藍燈巡航
+            self.btn_float.background_color = (0.5, 0.2, 0.8, 1)
             dest_info = f"鎖定：{self.destination}" if self.destination else "路線巡檢中"
             self.status_label.text = f"🟣 方案 B：深度巡航\n({dest_info} ｜ 5分鐘巡視)"
             self.status_label.color = (0.7, 0.4, 1.0, 1)
         elif self.current_mode == "C":
             self.btn_float.text = "聊"
-            self.btn_float.background_color = (0.9, 0.7, 0.1, 1) # 🟡 黃燈閒聊
+            self.btn_float.background_color = (0.9, 0.7, 0.1, 1)
             self.status_label.text = "🟡 方案 C：自由閒聊模式\n(解除字數限制，具備記憶)"
             self.status_label.color = (0.9, 0.8, 0.2, 1)
 
@@ -359,7 +351,6 @@ class FloatingWidget(BoxLayout):
         self.toggle_listening()
         raw = text.strip()
 
-        # 導航自動升級窗口
         if self.awaiting_upgrade_confirm:
             if any(yes in raw for yes in ["好", "要", "升級", "確定", "可以"]):
                 self.awaiting_upgrade_confirm = False
@@ -373,7 +364,6 @@ class FloatingWidget(BoxLayout):
                 self.bridge.speak("好的，維持原模式。")
                 return
 
-        # 執行喚醒詞寬鬆解析 (防誤觸)
         is_woken, command = WakeWordParser.extract_command(raw)
         if not is_woken:
             print(f"[過濾雜訊]: {raw}")
@@ -386,7 +376,6 @@ class FloatingWidget(BoxLayout):
 
         norm_cmd = WakeWordParser.normalize_text(command)
 
-        # 模式切換邏輯 (語音指令跨模式生效)
         if any(kw in norm_cmd for kw in ["開啟閒聊", "啟動閒聊", "閒聊模式"]):
             self.current_mode = "C"
             self.update_mode_ui()
@@ -409,14 +398,13 @@ class FloatingWidget(BoxLayout):
             self.bridge.speak("已退回方案 A 傳統待命模式，關閉背景巡檢與閒聊記憶。")
             return
 
-        # 若未觸發模式切換，則執行一般查詢
         self.execute_search_flow(command)
 
     def on_navigation_app_detected(self, app_name: str, detected_destination: str):
         self.destination = detected_destination
         self.awaiting_upgrade_confirm = True
         self.btn_float.text = "報"
-        self.btn_float.background_color = (0.9, 0.5, 0.1, 1) # 🟠 橘紅燈警報
+        self.btn_float.background_color = (0.9, 0.5, 0.1, 1)
         self.status_label.text = f"🟠 偵測導航：\n【{detected_destination}】\n是否升級 B 方案？"
         self.status_label.color = (1.0, 0.6, 0.2, 1)
         self.bridge.speak(f"偵測到您開啟導航前往{detected_destination}，是否升級 B 方案？請說要或不要。")
@@ -445,7 +433,7 @@ class FloatingWidget(BoxLayout):
         if success:
             if any(w in reply for w in ["警告", "塞車", "事故", "大雨", "積水"]):
                 self.btn_float.text = "報"
-                self.btn_float.background_color = (1.0, 0.4, 0.1, 1) # 🟠 橘紅燈閃爍
+                self.btn_float.background_color = (1.0, 0.4, 0.1, 1)
                 self.status_label.text = f"🟠 巡檢警報：\n{reply}"
                 self.status_label.color = (1.0, 0.5, 0.2, 1)
                 self.bridge.speak(f"副駕路況警報：{reply}")
@@ -455,7 +443,7 @@ class FloatingWidget(BoxLayout):
     def execute_search_flow(self, query: str, radius_km=None):
         r_text = f"{radius_km}公里內" if radius_km else "不限距離"
         self.btn_float.text = "運"
-        self.btn_float.background_color = (0.2, 0.4, 0.9, 1) # 🔵 藍燈運算中
+        self.btn_float.background_color = (0.2, 0.4, 0.9, 1)
         self.status_label.text = f"🔵 AI 運算中：\n「{query}」"
         self.status_label.color = (0.2, 0.6, 1.0, 1)
 
