@@ -27,13 +27,13 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Cache Buildozer (連回第 #11 次成功的快取)
+      - name: Cache Buildozer
         uses: actions/cache@v4
         with:
           path: |
             .buildozer
             ~/.buildozer
-          key: buildozer-${{ runner.os }}-v4-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-${{ runner.os }}-v4-ok-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
             buildozer-${{ runner.os }}-v4-
 
@@ -56,18 +56,24 @@ jobs:
           SDK_DIR="$HOME/.buildozer/android/platform/android-sdk"
           mkdir -p "$SDK_DIR/cmdline-tools"
           if [ ! -f "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]; then
+            rm -rf "$SDK_DIR/cmdline-tools/latest" "$SDK_DIR/cmdline-tools/cmdline-tools"
             wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
             unzip -q -o cmdline-tools.zip -d "$SDK_DIR/cmdline-tools"
-            rm -rf "$SDK_DIR/cmdline-tools/latest"
             mv "$SDK_DIR/cmdline-tools/cmdline-tools" "$SDK_DIR/cmdline-tools/latest"
           fi
           
-          ln -sfn "$SDK_DIR/cmdline-tools/latest" "$SDK_DIR/tools"
+          # 先清除舊的 tools 目錄避免快取還原時發生 ln 衝突，再重新建立連結
+          rm -rf "$SDK_DIR/tools"
+          mkdir -p "$SDK_DIR/tools/bin"
+          ln -sf "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" "$SDK_DIR/tools/bin/sdkmanager"
+          ln -sf "$SDK_DIR/cmdline-tools/latest/bin/avdmanager" "$SDK_DIR/tools/bin/avdmanager"
           
           mkdir -p "$SDK_DIR/licenses"
           echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$SDK_DIR/licenses/android-sdk-license"
           echo -e "\n84831b9409646a918e30573bab4c9c91346d8abd" >> "$SDK_DIR/licenses/android-sdk-license"
-          yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" --licenses || true
+          
+          yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" --licenses > /dev/null || true
+          yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" "platform-tools" "platforms;android-34" "build-tools;34.0.0" > /dev/null || true
 
       - name: Install Buildozer and Cython
         run: |
