@@ -25,7 +25,6 @@ from kivy.core.window import Window
 IS_ANDROID = platform.system() == "Linux" and "ANDROID_STORAGE" in os.environ
 
 def register_chinese_font():
-    """在 App 啟動時安全掛載 Android 系統內建繁體中文字型"""
     font_candidates = [
         "/system/fonts/NotoSansCJK-Regular.ttc",
         "/system/fonts/NotoSansTC-Regular.otf",
@@ -247,7 +246,7 @@ class GeminiCopilotAI:
     def query_task(self, prompt: str, poi_context: str, callback):
         def _worker():
             if not self.api_key:
-                callback("尚未設定 API 金鑰！請長按下方圓鈕 0.8 秒開啟選單並輸入金鑰。", False, "")
+                callback("尚未設定 API 金鑰！請長按下方圓鈕開啟選單輸入。", False, "")
                 return
             try:
                 sys_prompt = (
@@ -263,19 +262,18 @@ class GeminiCopilotAI:
                 reply_text = self._call_gemini_rest(contents, sys_prompt, temperature=0.3)
                 self._process_response(reply_text, callback)
             except Exception as e:
-                callback(f"連線或金鑰異常：{str(e)[:35]}", False, "")
+                callback(f"連線異常：{str(e)[:30]}", False, "")
         threading.Thread(target=_worker, daemon=True).start()
 
     def query_chat(self, prompt: str, poi_context: str, callback):
         def _worker():
             if not self.api_key:
-                callback("尚未設定 API 金鑰！請長按下方圓鈕 0.8 秒開啟選單並輸入金鑰。", False, "")
+                callback("尚未設定 API 金鑰！請長按下方圓鈕開啟選單輸入。", False, "")
                 return
             try:
                 chat_sys_prompt = (
-                    "你是「峻爸副駕 v4」隨車智慧 AI，兼具專業領航員與幽默副駕駛雙重身分。嚴禁 markdown 與表情符號。\n"
-                    "目前處於【閒聊與深度探索模式】：\n"
-                    "請解除所有字數限制！展現博學、幽默、像朋友一樣的語氣，可以深度分析景點典故或進行長篇自由對談。\n"
+                    "你是「峻爸副駕 v4」隨車智慧 AI，兼具專業領航員與幽默副駕駛身分。嚴禁 markdown 與表情符號。\n"
+                    "目前處於【閒聊模式】：解除所有字數限制！展現幽默、像朋友一樣的語氣。\n"
                     "若使用者確定要導航，請在對話最後附上 [MAP:目標名稱]。"
                 )
                 full_message = f"{poi_context}\n駕駛說：{prompt}" if poi_context else prompt
@@ -285,7 +283,7 @@ class GeminiCopilotAI:
                 self.chat_history.append({"role": "model", "parts": [{"text": reply_text}]})
                 self._process_response(reply_text, callback)
             except Exception as e:
-                callback(f"閒聊連線異常：{str(e)[:35]}", False, "")
+                callback(f"閒聊異常：{str(e)[:30]}", False, "")
         threading.Thread(target=_worker, daemon=True).start()
 
     def _process_response(self, full_text: str, callback):
@@ -299,7 +297,7 @@ class GeminiCopilotAI:
 
 class FloatingWidget(BoxLayout):
     def __init__(self, **kwargs):
-        super().__init__(orientation="vertical", spacing=12, padding=16, **kwargs)
+        super().__init__(orientation="vertical", spacing=8, padding=12, **kwargs)
         self.bridge = AndroidBridge(self.on_speech_recognized, self.on_navigation_app_detected)
         self.ai = GeminiCopilotAI()
         self.poi_mgr = POIManager()
@@ -314,10 +312,11 @@ class FloatingWidget(BoxLayout):
         self.long_press_clock = None
         self.monitor_thread = None
 
+        # 狀態顯示面板
         self.status_label = Label(
-            text="【方案 A：待命中】\n點按下方圓鈕說話 (需喊「副駕副駕」)\n長按圓鈕 0.8 秒開啟選單與金鑰設定",
-            font_size="20sp",
-            size_hint_y=0.45,
+            text="【A: 待命】點圓鈕說話 (喊「副駕副駕」)\n長按圓鈕 0.8 秒開選單",
+            font_size="17sp",
+            size_hint_y=0.35,
             color=(0.2, 0.9, 0.4, 1),
             halign="center",
             valign="middle"
@@ -325,19 +324,21 @@ class FloatingWidget(BoxLayout):
         self.status_label.bind(size=self.status_label.setter('text_size'))
         self.add_widget(self.status_label)
 
+        # 【核心修正】將按鈕改為 1 公分大小的單一字圓形按鈕 (80dp)
+        btn_layout = BoxLayout(size_hint_y=0.65, orientation="vertical")
         self.btn_float = Button(
-            text="待命\n(點按說話)",
+            text="待",
             font_size="28sp",
             bold=True,
-            halign="center",
             size_hint=(None, None),
-            size=("170dp", "170dp"),
-            pos_hint={"center_x": 0.5},
+            size=("80dp", "80dp"),
+            pos_hint={"center_x": 0.5, "center_y": 0.5},
             background_color=(0.1, 0.6, 0.3, 1)
         )
         self.btn_float.bind(on_touch_down=self.on_btn_touch_down)
         self.btn_float.bind(on_touch_up=self.on_btn_touch_up)
-        self.add_widget(self.btn_float)
+        btn_layout.add_widget(self.btn_float)
+        self.add_widget(btn_layout)
 
     def on_btn_touch_down(self, instance, touch):
         if instance.collide_point(*touch.pos):
@@ -358,9 +359,9 @@ class FloatingWidget(BoxLayout):
     def toggle_listening(self):
         if not self.is_listening:
             self.is_listening = True
-            self.btn_float.text = "監聽中"
+            self.btn_float.text = "監"
             self.btn_float.background_color = (0.9, 0.2, 0.2, 1)
-            self.status_label.text = "【語音監聽中】\n請說「副駕副駕」+ 您的指令..."
+            self.status_label.text = "【監聽中】請說「副駕副駕」+指令..."
             self.status_label.color = (1.0, 0.4, 0.4, 1)
             self.bridge.start_speech_recognition()
         else:
@@ -369,20 +370,20 @@ class FloatingWidget(BoxLayout):
 
     def update_mode_ui(self):
         if self.current_mode == "A":
-            self.btn_float.text = "待命\n(點按說話)"
+            self.btn_float.text = "待"
             self.btn_float.background_color = (0.1, 0.6, 0.3, 1)
-            self.status_label.text = "【方案 A：傳統待命】\n(單次精確指令 ｜ 長按圓鈕開選單)"
+            self.status_label.text = "【A: 待命】點圓鈕說話 (喊「副駕副駕」)\n長按圓鈕 0.8 秒開選單"
             self.status_label.color = (0.2, 0.9, 0.4, 1)
         elif self.current_mode == "B":
-            self.btn_float.text = "巡航中"
+            self.btn_float.text = "巡"
             self.btn_float.background_color = (0.5, 0.2, 0.8, 1)
-            dest_info = f"鎖定：{self.destination}" if self.destination else "路線巡檢中"
-            self.status_label.text = f"【方案 B：深度巡航】\n({dest_info} ｜ 每5分鐘路況巡視)"
+            dest = f"({self.destination})" if self.destination else ""
+            self.status_label.text = f"【B: 巡航】每5分鐘路況巡檢 {dest}"
             self.status_label.color = (0.7, 0.5, 1.0, 1)
         elif self.current_mode == "C":
-            self.btn_float.text = "閒聊中"
+            self.btn_float.text = "聊"
             self.btn_float.background_color = (0.9, 0.7, 0.1, 1)
-            self.status_label.text = "【方案 C：自由閒聊模式】\n(解除字數限制，具備對話記憶)"
+            self.status_label.text = "【C: 閒聊】自由對話模式 (無字數限制)"
             self.status_label.color = (0.9, 0.8, 0.2, 1)
 
     def on_speech_recognized(self, text: str):
@@ -397,7 +398,7 @@ class FloatingWidget(BoxLayout):
                 self.awaiting_upgrade_confirm = False
                 self.current_mode = "B"
                 self.update_mode_ui()
-                self.bridge.speak(f"已啟動方案 B 深度巡航，正在為您監控前往 {self.destination} 的天候與路況！")
+                self.bridge.speak(f"已啟動方案 B 深度巡航，正在監控前往 {self.destination} 的路況！")
                 self.start_plan_b_monitoring()
                 return
             elif any(no in raw for no in ["不要", "不用", "取消", "維持"]):
@@ -408,7 +409,7 @@ class FloatingWidget(BoxLayout):
 
         is_woken, command = WakeWordParser.extract_command(raw)
         if not is_woken:
-            self.status_label.text = f"【未偵測到喚醒詞】\n聽到：「{raw}」\n(需喊「副駕副駕」才會執行)"
+            self.status_label.text = f"【忽略雜訊】聽到：「{raw}」\n(需喊「副駕副駕」)"
             self.status_label.color = (0.8, 0.8, 0.8, 1)
             return
 
@@ -425,7 +426,7 @@ class FloatingWidget(BoxLayout):
         if any(kw in norm_cmd for kw in ["開啟閒聊", "啟動閒聊", "閒聊模式"]):
             self.current_mode = "C"
             self.update_mode_ui()
-            self.bridge.speak("已切換為閒聊模式，字數限制解除，想聊什麼歷史或景點都可以說！")
+            self.bridge.speak("已切換為閒聊模式。")
             return
             
         if any(kw in norm_cmd for kw in ["開b方案", "啟動巡航", "開始巡檢", "方案b"]):
@@ -434,7 +435,7 @@ class FloatingWidget(BoxLayout):
                 self.destination = dest
             self.current_mode = "B"
             self.update_mode_ui()
-            self.bridge.speak("收到，已啟動方案 B 巡航模式！")
+            self.bridge.speak("已啟動方案 B 巡航模式！")
             self.start_plan_b_monitoring()
             return
 
@@ -442,7 +443,7 @@ class FloatingWidget(BoxLayout):
             self.current_mode = "A"
             self.destination = ""
             self.update_mode_ui()
-            self.bridge.speak("已退回方案 A 傳統待命模式。")
+            self.bridge.speak("已退回方案 A 待命模式。")
             return
 
         self.execute_search_flow(command)
@@ -450,11 +451,11 @@ class FloatingWidget(BoxLayout):
     def on_navigation_app_detected(self, app_name: str, detected_destination: str):
         self.destination = detected_destination
         self.awaiting_upgrade_confirm = True
-        self.btn_float.text = "警示"
+        self.btn_float.text = "報"
         self.btn_float.background_color = (0.9, 0.5, 0.1, 1)
-        self.status_label.text = f"【偵測導航：{detected_destination}】\n是否升級 B 方案？"
+        self.status_label.text = f"【偵測導航】前往【{detected_destination}】\n是否升級 B 方案？"
         self.status_label.color = (1.0, 0.6, 0.2, 1)
-        self.bridge.speak(f"偵測到您開啟導航前往{detected_destination}，是否升級 B 方案？請說要或不要。")
+        self.bridge.speak(f"偵測導航前往{detected_destination}，是否升級 B 方案？請說要或不要。")
 
     def start_plan_b_monitoring(self):
         if self.monitor_thread and self.monitor_thread.is_alive():
@@ -480,9 +481,9 @@ class FloatingWidget(BoxLayout):
     def on_monitor_alert(self, reply: str, success: bool, map_target: str):
         if success:
             if any(w in reply for w in ["警告", "塞車", "事故", "大雨", "積水"]):
-                self.btn_float.text = "路況警報"
+                self.btn_float.text = "警"
                 self.btn_float.background_color = (1.0, 0.4, 0.1, 1)
-                self.status_label.text = f"【巡檢警報】\n{reply}"
+                self.status_label.text = f"【巡檢警報】{reply}"
                 self.status_label.color = (1.0, 0.5, 0.2, 1)
                 self.bridge.speak(f"副駕路況警報：{reply}")
             else:
@@ -490,9 +491,9 @@ class FloatingWidget(BoxLayout):
 
     def execute_search_flow(self, query: str, radius_km=None):
         r_text = f"{radius_km}公里內" if radius_km else "不限距離"
-        self.btn_float.text = "運算中"
+        self.btn_float.text = "運"
         self.btn_float.background_color = (0.2, 0.4, 0.9, 1)
-        self.status_label.text = f"【AI 運算中】\n正在處理：「{query}」..."
+        self.status_label.text = f"【運算中】處理：「{query}」..."
         self.status_label.color = (0.4, 0.7, 1.0, 1)
 
         nearby_list = self.poi_mgr.get_nearby_pois(self.cur_lat, self.cur_lng, radius_km)
@@ -511,7 +512,7 @@ class FloatingWidget(BoxLayout):
 
     @mainthread
     def on_ai_response(self, reply: str, success: bool, map_target: str):
-        self.btn_float.text = "播報中\n(點按中斷)"
+        self.btn_float.text = "播"
         self.status_label.text = reply
         self.status_label.color = (0.2, 0.9, 0.5, 1) if success else (1.0, 0.4, 0.4, 1)
         self.bridge.speak(reply)
@@ -520,13 +521,18 @@ class FloatingWidget(BoxLayout):
 
     def open_main_menu(self):
         self.long_press_clock = None
-        layout = BoxLayout(orientation="vertical", spacing=8, padding=12)
-        popup = Popup(title="峻爸副駕中樞控制盤", content=layout, size_hint=(0.92, 0.88))
+        # 【核心修正】使用完美的垂直 BoxLayout 與固定比例分配，徹底消除內選單重疊
+        layout = BoxLayout(orientation="vertical", spacing=10, padding=14)
+        popup = Popup(title="峻爸副駕控制盤", content=layout, size_hint=(0.90, 0.85))
 
-        mode_box = GridLayout(cols=3, spacing=6, size_hint_y=0.14)
-        btn_ma = Button(text="切換 方案A\n(一般待命)", font_size="14sp", halign="center", background_color=(0.1, 0.6, 0.3, 1))
-        btn_mb = Button(text="切換 方案B\n(路況巡航)", font_size="14sp", halign="center", background_color=(0.5, 0.2, 0.8, 1))
-        btn_mc = Button(text="切換 方案C\n(自由閒聊)", font_size="14sp", halign="center", background_color=(0.8, 0.6, 0.1, 1))
+        # 標題
+        layout.add_widget(Label(text="【 峻爸副駕中樞控制盤 】", font_size="18sp", bold=True, size_hint_y=None, height="35dp", color=(0.3, 0.8, 1.0, 1)))
+
+        # 1. 方案切換按鈕列
+        mode_box = GridLayout(cols=3, spacing=6, size_hint_y=None, height="45dp")
+        btn_ma = Button(text="方案A(待命)", font_size="13sp", background_color=(0.1, 0.6, 0.3, 1))
+        btn_mb = Button(text="方案B(巡航)", font_size="13sp", background_color=(0.5, 0.2, 0.8, 1))
+        btn_mc = Button(text="方案C(閒聊)", font_size="13sp", background_color=(0.8, 0.6, 0.1, 1))
         
         btn_ma.bind(on_press=lambda x: [popup.dismiss(), self.process_verified_command("退回a方案")])
         btn_mb.bind(on_press=lambda x: [popup.dismiss(), self.process_verified_command("開b方案")])
@@ -536,14 +542,16 @@ class FloatingWidget(BoxLayout):
         mode_box.add_widget(btn_mc)
         layout.add_widget(mode_box)
 
-        dist_box = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=0.12)
-        dist_box.add_widget(Label(text="搜尋距離：", font_size="16sp", size_hint_x=0.35))
-        dist_spinner = Spinner(text="3公里內", values=("1公里內", "3公里內", "5公里內", "不限距離"), font_size="16sp", size_hint_x=0.65)
+        # 2. 搜尋距離選單
+        dist_box = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=None, height="45dp")
+        dist_box.add_widget(Label(text="搜尋距離：", font_size="15sp", size_hint_x=0.35))
+        dist_spinner = Spinner(text="3公里內", values=("1公里內", "3公里內", "5公里內", "不限距離"), font_size="15sp", size_hint_x=0.65)
         dist_box.add_widget(dist_spinner)
         layout.add_widget(dist_box)
 
-        btn_grid = GridLayout(cols=2, spacing=8, size_hint_y=0.26)
-        btn_food = Button(text="【找附近好吃】\n3.5星+ 無負評美食", font_size="17sp", halign="center", background_color=(0.9, 0.5, 0.1, 1))
+        # 3. 好吃 / 好玩按鈕
+        btn_grid = GridLayout(cols=2, spacing=8, size_hint_y=None, height="70dp")
+        btn_food = Button(text="🍜 找附近好吃\n(3.5星+無負評)", font_size="15sp", halign="center", background_color=(0.9, 0.5, 0.1, 1))
         def _search_food(x):
             km_map = {"1公里內": 1.0, "3公里內": 3.0, "5公里內": 5.0, "不限距離": None}
             popup.dismiss()
@@ -551,7 +559,7 @@ class FloatingWidget(BoxLayout):
         btn_food.bind(on_press=_search_food)
         btn_grid.add_widget(btn_food)
 
-        btn_spot = Button(text="【找附近好玩】\n休閒景點與秘境", font_size="17sp", halign="center", background_color=(0.2, 0.7, 0.3, 1))
+        btn_spot = Button(text="🏕️ 找附近好玩\n(休閒景點秘境)", font_size="15sp", halign="center", background_color=(0.2, 0.7, 0.3, 1))
         def _search_spot(x):
             km_map = {"1公里內": 1.0, "3公里內": 3.0, "5公里內": 5.0, "不限距離": None}
             popup.dismiss()
@@ -560,9 +568,10 @@ class FloatingWidget(BoxLayout):
         btn_grid.add_widget(btn_spot)
         layout.add_widget(btn_grid)
 
-        cmd_box = BoxLayout(orientation="horizontal", spacing=6, size_hint_y=0.13)
-        cmd_input = TextInput(hint_text="也可直接打字輸入指令或問題...", multiline=False, font_size="15sp", size_hint_x=0.72)
-        btn_send = Button(text="送出", font_size="15sp", size_hint_x=0.28, background_color=(0.2, 0.5, 0.9, 1))
+        # 4. 手動輸入指令框
+        cmd_box = BoxLayout(orientation="horizontal", spacing=6, size_hint_y=None, height="45dp")
+        cmd_input = TextInput(hint_text="輸入指令 (例: 附近加油站)...", multiline=False, font_size="14sp", size_hint_x=0.75)
+        btn_send = Button(text="送出", font_size="14sp", size_hint_x=0.25, background_color=(0.2, 0.5, 0.9, 1))
         def _send_manual(x):
             q = cmd_input.text.strip()
             if q:
@@ -573,19 +582,20 @@ class FloatingWidget(BoxLayout):
         cmd_box.add_widget(btn_send)
         layout.add_widget(cmd_box)
 
-        btn_settings = Button(text="[ 系統設定與 API 金鑰 ] (點此展開)", font_size="14sp", size_hint_y=0.11, background_color=(0.3, 0.4, 0.4, 1))
+        # 5. API 金鑰設定區
+        btn_settings = Button(text="⚙️ 系統設定與 API 金鑰 (點此展開)", font_size="13sp", size_hint_y=None, height="40dp", background_color=(0.3, 0.4, 0.4, 1))
         settings_panel = BoxLayout(orientation="vertical", spacing=6, size_hint_y=None, height=0, opacity=0)
         
         key_status = "已設定金鑰" if self.ai.api_key else "尚未設定金鑰！"
-        perm_label = Label(text=f"目前狀態：{key_status}", font_size="13sp", size_hint_y=0.28, color=(0.9, 0.9, 0.5, 1))
+        perm_label = Label(text=f"狀態：{key_status}", font_size="12sp", size_hint_y=None, height="25dp", color=(0.9, 0.9, 0.5, 1))
         settings_panel.add_widget(perm_label)
-        api_input = TextInput(hint_text="貼上 Gemini API Key...", password=True, multiline=False, size_hint_y=0.36)
+        api_input = TextInput(hint_text="貼上 Gemini API Key...", password=True, multiline=False, size_hint_y=None, height="38dp", font_size="13sp")
         settings_panel.add_widget(api_input)
         
-        btn_action_box = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=0.36)
-        btn_get_api = Button(text="前往獲取金鑰", font_size="14sp", background_color=(0.2, 0.6, 1.0, 1))
+        btn_action_box = BoxLayout(orientation="horizontal", spacing=8, size_hint_y=None, height="38dp")
+        btn_get_api = Button(text="獲取金鑰", font_size="13sp", background_color=(0.2, 0.6, 1.0, 1))
         btn_get_api.bind(on_press=lambda x: webbrowser.open("https://aistudio.google.com/app/apikey"))
-        btn_save = Button(text="加密儲存並收折", font_size="14sp", background_color=(0.1, 0.6, 0.3, 1))
+        btn_save = Button(text="加密儲存並收折", font_size="13sp", background_color=(0.1, 0.6, 0.3, 1))
         btn_action_box.add_widget(btn_get_api)
         btn_action_box.add_widget(btn_save)
         settings_panel.add_widget(btn_action_box)
@@ -595,13 +605,15 @@ class FloatingWidget(BoxLayout):
 
         def toggle_settings(instance):
             if settings_panel.height == 0:
-                settings_panel.height = "130dp"
+                settings_panel.height = 110
                 settings_panel.opacity = 1
-                btn_settings.text = "[ 系統設定與 API 金鑰 ] (點此收起)"
+                btn_settings.text = "⚙️ 系統設定與 API 金鑰 (點此收起)"
+                popup.size_hint_y = 0.94
             else:
                 settings_panel.height = 0
                 settings_panel.opacity = 0
-                btn_settings.text = "[ 系統設定與 API 金鑰 ] (點此展開)"
+                btn_settings.text = "⚙️ 系統設定與 API 金鑰 (點此展開)"
+                popup.size_hint_y = 0.85
         btn_settings.bind(on_press=toggle_settings)
 
         def save_api_securely(instance):
@@ -613,7 +625,7 @@ class FloatingWidget(BoxLayout):
                 self.ai.api_key = key
                 self.ai._init_gemini()
                 api_input.text = ""
-                perm_label.text = "目前狀態：金鑰已成功更新！"
+                perm_label.text = "狀態：金鑰已成功更新！"
             toggle_settings(None)
             self.bridge.speak("API 金鑰已加密儲存。")
         btn_save.bind(on_press=save_api_securely)
