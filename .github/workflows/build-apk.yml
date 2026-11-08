@@ -22,20 +22,20 @@ jobs:
           python-version: '3.10'
 
       - name: Setup Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Cache Buildozer (加速編譯快取，避免每次重跑 30 分鐘)
+      - name: Cache Buildozer
         uses: actions/cache@v4
         with:
           path: |
             .buildozer
             ~/.buildozer
-          key: buildozer-${{ runner.os }}-v4-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-${{ runner.os }}-v4.1-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            buildozer-${{ runner.os }}-v4-
+            buildozer-${{ runner.os }}-v4.1-
 
       - name: Inject GitHub Secrets to config.json
         run: |
@@ -55,9 +55,10 @@ jobs:
         run: |
           SDK_DIR="$HOME/.buildozer/android/platform/android-sdk"
           mkdir -p "$SDK_DIR/cmdline-tools"
-          if [ ! -d "$SDK_DIR/cmdline-tools/latest" ]; then
+          if [ ! -f "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]; then
+            rm -rf "$SDK_DIR/cmdline-tools/latest" "$SDK_DIR/cmdline-tools/cmdline-tools"
             wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
-            unzip -q cmdline-tools.zip -d "$SDK_DIR/cmdline-tools"
+            unzip -q -o cmdline-tools.zip -d "$SDK_DIR/cmdline-tools"
             mv "$SDK_DIR/cmdline-tools/cmdline-tools" "$SDK_DIR/cmdline-tools/latest"
           fi
           
@@ -69,7 +70,7 @@ jobs:
           echo -e "\n24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$SDK_DIR/licenses/android-sdk-license"
           echo -e "\n84831b9409646a918e30573bab4c9c91346d8abd" >> "$SDK_DIR/licenses/android-sdk-license"
           yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" --licenses || true
-          "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" "platform-tools" "platforms;android-34" "build-tools;34.0.0" || true
 
       - name: Install Buildozer and Cython
         run: |
@@ -78,6 +79,7 @@ jobs:
 
       - name: Run Buildozer
         run: |
+          rm -rf bin/*.apk
           yes | buildozer android debug
 
       - name: Prepare APK
@@ -91,8 +93,14 @@ jobs:
           cp "$APK_PATH" bin/JunbaCopilot-v4.apk
           echo "apk_file=bin/JunbaCopilot-v4.apk" >> $GITHUB_OUTPUT
           
-          RELEASE_TAG="v$(date +'%Y.%m.%d-%H%M')"
+          RELEASE_TAG="v$(date +'%Y.%m.%d-%H%M%S')"
           echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Upload APK to Actions Artifact (保底直接下載區)
+        uses: actions/upload-artifact@v4
+        with:
+          name: JunbaCopilot-v4-APK
+          path: bin/JunbaCopilot-v4.apk
 
       - name: Release APK
         uses: softprops/action-gh-release@v2
@@ -100,11 +108,11 @@ jobs:
           tag_name: ${{ steps.prepare_apk.outputs.release_tag }}
           name: 峻爸副駕 v4 (${{ steps.prepare_apk.outputs.release_tag }})
           body: |
-            ### 🚗 峻爸副駕 v4 最新安裝檔
-            * **核心功能**：
-              - 寬鬆喚醒詞過濾
-              - A/B/C 三種方案切換
-              - 閒聊模式與路況巡檢
+            ### 🚗 峻爸副駕 v4 最新安裝檔 (中文字型與語音修復版)
+            * **修復內容**：
+              - 掛載 Android 系統內建繁體中文字型，消除方框亂碼
+              - 綁定語音辨識結果回傳監聽器
+              - 新增手動文字輸入備用框與模式快速切換鈕
           files: ${{ steps.prepare_apk.outputs.apk_file }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
